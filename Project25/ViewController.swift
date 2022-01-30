@@ -11,6 +11,11 @@ import MultipeerConnectivity
 
 
 // CHALLENGE
+// 1. Show an alert when a user has disconnected from our multipeer network. Something like “Paul’s iPhone has disconnected” is enough. ✅
+
+// 2. Try sending text messages across the network. You can create a Data from a string using Data(yourString.utf8), and convert a Data back to a string by using String(decoding: yourData, as: UTF8.self). ✅
+
+// 3. Add a button that shows an alert controller listing the names of all devices currently connected to the session – use the connectedPeers property of your session to find that information.
 
 
 class ViewController: UICollectionViewController, UINavigationControllerDelegate, UIImagePickerControllerDelegate, MCSessionDelegate, MCBrowserViewControllerDelegate, MCNearbyServiceAdvertiserDelegate {
@@ -19,6 +24,10 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
     
 
     var images = [UIImage]()
+    
+    
+//    challenge 2
+    var message = ""
     
 //    creating instances for our Multipeer Connectivity
     var peerID = MCPeerID(displayName: UIDevice.current.name)
@@ -40,8 +49,14 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
         title = "Selfie Share"
         navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .camera, target: self, action: #selector(importPhoto))
         
+        
+        let message = UIBarButtonItem(barButtonSystemItem: .compose, target: self, action: #selector(sendText))
+        let join = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(showConnectionPrompt))
 //        button to ask users whether they want to connect to an existing session with others.
-        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(showConnectionPrompt))
+        
+        
+//        challenge 2 - send a text message across network
+        navigationItem.leftBarButtonItems = [join, message]
         
         
         
@@ -74,7 +89,28 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
         let ac = UIAlertController(title: "Connect to others", message: nil, preferredStyle: .alert)
         ac.addAction(UIAlertAction(title: "Host a session", style: .default, handler: startHosting))
         ac.addAction(UIAlertAction(title: "Join a session", style: .default, handler: joinSession))
+        ac.addAction(UIAlertAction(title: "Leave session", style: .default, handler: leaveSession))
         ac.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(ac, animated: true)
+    }
+    
+//      CHALLENGE 2
+//        text message function
+    @objc func sendText() {
+        let ac = UIAlertController(title: "Send Message", message: nil, preferredStyle: .alert)
+        ac.addTextField()
+        
+        let sendMessage = UIAlertAction(title: "Send", style: .default) {
+            [unowned ac]_ in
+            guard let textMessage = ac.textFields![0].text else { return }
+            self.message = textMessage
+            self.broadcastMessage(message: textMessage)
+            
+            
+        }
+        
+        ac.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        ac.addAction(sendMessage)
         present(ac, animated: true)
     }
     
@@ -129,6 +165,18 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
         present(mcBrowser, animated: true)
     }
     
+//    challenge 1. Handler for when user taps leave session option, it'll disconnect the current session.
+    func leaveSession(action: UIAlertAction) {
+        guard let mcSession = mcSession else {
+            let ac = UIAlertController(title: "No Session in progress", message: nil, preferredStyle: .alert)
+            ac.addAction(UIAlertAction(title: "Dismiss", style: .cancel))
+            
+            return
+        }
+        
+        mcSession.disconnect()
+    }
+    
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {
         
     }
@@ -156,7 +204,19 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
         case .connecting:
             print("Connecting: \(peerID.displayName)")
         case .notConnected:
+//            challenge 1 - when user disconnects, show alert
+//            here you get an error when things get connected. Need to call on the main thread for this.
+            DispatchQueue.main.async {
+                [weak self] in
+                let disconnectedAC = UIAlertController(title: "User disconnected", message: "\(peerID.displayName) has disconnected", preferredStyle: .alert)
+                disconnectedAC.addAction(UIAlertAction(title: "OK", style: .default))
+                self?.present(disconnectedAC, animated: true)
+            }
+            
+
             print("Disconnected: \(peerID.displayName)")
+            
+            
             
         @unknown default:
             print("Unknown state received: \(peerID.displayName)")
@@ -166,9 +226,19 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         DispatchQueue.main.async {
             [weak self] in
+            
+//            2.  Try sending text messages across the network. You can create a Data from a string using Data(yourString.utf8), and convert a Data back to a string by using String(decoding: yourData, as: UTF8.self).
+            let textDataToString = String(decoding: data, as: UTF8.self)
+            
             if let image = UIImage(data: data) {
                 self?.images.insert(image, at: 0)
                 self?.collectionView.reloadData()
+            }
+            
+            if textDataToString != "" {
+                let ac = UIAlertController(title: "Message", message: textDataToString, preferredStyle: .alert)
+                ac.addAction(UIAlertAction(title: "Dismiss", style: .default))
+                self?.present(ac, animated: true)
             }
         }
     }
@@ -182,6 +252,40 @@ class ViewController: UICollectionViewController, UINavigationControllerDelegate
         
         present(ac, animated: true)
     }
+    
+    func disconnectedPrompt(peerID: MCPeerID) {
+        let ac = UIAlertController(title: "User disconnected", message: "\(peerID.displayName) has disconnected", preferredStyle: .alert)
+        ac.addAction(UIAlertAction(title: "OK", style: .default))
+        present(ac, animated: true)
+        
+    }
+    
+//  2.  Try sending text messages across the network. You can create a Data from a string using Data(yourString.utf8), and convert a Data back to a string by using String(decoding: yourData, as: UTF8.self).
+    func broadcastMessage(message: String) {
+        guard let mcSession = mcSession else {
+            return
+        }
+        
+        let textData = Data(message.utf8)
+        
+        if mcSession.connectedPeers.count > 0 {
+            
+            if message != ""  {
+                
+                do {
+                    try mcSession.send(textData, toPeers: mcSession.connectedPeers, with: .reliable)
+                    
+                } catch {
+                    let ac = UIAlertController(title: "Send error", message: error.localizedDescription, preferredStyle: .alert)
+                    ac.addAction(UIAlertAction(title: "Dismiss", style: .default))
+                    present(ac, animated: true)
+                }
+            }
+        }
+
+    }
+    
+    
   
 
 }
